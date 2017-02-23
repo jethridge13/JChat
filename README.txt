@@ -7,3 +7,5 @@ Events that are always printed:
 -A user logs off from the server
 
 Events that are only printed when verbose is ticked:
+-The full IP address of the server is printed
+-The login thread starts

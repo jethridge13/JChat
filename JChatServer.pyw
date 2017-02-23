@@ -4,9 +4,13 @@ from tkinter import *
 from socket import *
 import tkinter.scrolledtext as ST
 import tkinter.messagebox as MB
+import urllib.request
+import json
 
 
 DEFAULT_PORT = 9966
+runServer = False
+global loginThread
 
 EOM = "\"\r\n\r\n\""
 
@@ -33,11 +37,21 @@ def quitConfirm():
 
 def quitServer():
     #TODO As program progresses, add additional shutdown logic.
-    sys.exit()
+    global runServer
+    if not runServer:
+        shutdown()
+    else:
+        runServer = False
 
 
 def restartConfirm():
     print("Restart?")
+
+
+def shutdown():
+    sPrint("Shutting down server...")
+    root.destroy()
+    sys.exit(1)
 
 
 def sPrint(s):
@@ -50,6 +64,7 @@ def sPrint(s):
 
 def vPrint(s):
     if verbose.get():
+        s += "\n"
         outputLock.acquire()
         output.configure(state="normal")
         output.insert(tkinter.END, s)
@@ -58,14 +73,23 @@ def vPrint(s):
 
 
 def startServer():
-    #TODO Start server
     # Prepare the socket
     serverPort = DEFAULT_PORT
     serverSocket = socket(AF_INET, SOCK_STREAM)
     serverSocket.bind(("", serverPort))
 
+    global loginThread
+    loginThread = LoginThread(serverSocket)
+    loginThread.start()
+
     sPrint("Starting server...")
-    sPrint("Listening on port " + str(serverPort))
+    if verbose:
+        with urllib.request.urlopen("http://ip.jsontest.com/") as response:
+            html = response.read()
+            data = json.loads(html)
+            vPrint("Running on " + data["ip"] + ":" + str(serverPort))
+    else:
+        sPrint("Listening on port " + str(serverPort))
     start["text"] = "Restart Server"
     start.config(command = restartConfirm)
 
@@ -84,36 +108,42 @@ class ConnThread (threading.Thread):
     #TODO More functionality here
 
 class LoginThread(threading.Thread):
-
+    #TODO Thread still running at end after shutting down
     def __init__(self, serverSocket):
         threading.Thread.__init__(self)
         self.serverSocket = serverSocket
 
     def run(self):
-        print("Login Thread running")
+        vPrint("Login Thread running")
         freeThreadID = 0
+        global runServer
         runServer = True
         # Functionality loop
         while runServer:
             try:
+                self.serverSocket.settimeout(1)
                 self.serverSocket.listen(1)
-                # Connection received from client
-                clientSocket, addr = self.serverSocket.accept()
-                sPrint("Connection received from " + str(addr[0]) + ":" + str(addr[1]))
-                thread = ConnThread(freeThreadID, clientSocket, addr[0], addr[1])
-                freeThreadID += 1
+                if runServer:
+                    # Connection received from client
+                    clientSocket, addr = self.serverSocket.accept()
+                    sPrint("Connection received from " + str(addr[0]) + ":" + str(addr[1]))
+                    thread = ConnThread(freeThreadID, clientSocket, addr[0], addr[1])
+                    freeThreadID += 1
 
-                # Add the thread to the list of threads
-                usersLock.acquire()
-                threads.append(thread)
-                usersLock.release()
+                    # Add the thread to the list of threads
+                    usersLock.acquire()
+                    threads.append(thread)
+                    usersLock.release()
 
-                # Start the thread
-                thread.start()
-            except OSError:
-                sPrint("The socket in the login thread has closed.")
-                sPrint("If this was triggered by something other than a server shutdown, a critical error has occured.")
-                runServer = False
+                    # Start the thread
+                    thread.start()
+            except OSError as e:
+                if not isinstance(e, timeout):
+                    sPrint("The socket in the login thread has closed.")
+                    sPrint(
+                        "If this was triggered by something other than a server shutdown, a critical error has occured.")
+                    runServer = False
+        shutdown()
 
 
 
